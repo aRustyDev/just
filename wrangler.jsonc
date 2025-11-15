@@ -2,6 +2,12 @@
   "name": "just-worker",
   "compatibility_date": "2025-11-15",
   "assets": {
-    "directory": "./modules",
+    "directory": "./modules"
   },
+  "routes": [
+    {
+      "pattern": "just.arusty.dev",
+      "custom_domain": true
+    }
+  ]
 }
