@@ -1,4 +1,3 @@
-
 claude:
     echo "TODO: Setup repo for claude code integration, using .ai/* contents"
 
