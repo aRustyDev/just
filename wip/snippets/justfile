@@ -1,0 +1,2 @@
+kube test:
+    @curl https://sscm.gus.cisco.com/-/snippets/5 | kubectl -

@@ -1,0 +1,4 @@
+setup:
+    @proxify -sa ":9876" -o "${XDG_CACHE_HOME:-$HOME/.local/cache}/proxify/9876.jsonl" -sr "${XDG_CACHE_HOME:-$HOME/.local/cache}/proxify" -config-directory "${XDG_CONFIG_HOME:-$HOME/.config}/proxify"
+
+clean:

@@ -1,0 +1,22 @@
+ECR_REGISTRY := "396913725940.dkr.ecr.us-east-1.amazonaws.com"
+ECR_REPOSITORY := "platform-tools"
+VER_TAG := "latest"
+
+build:
+    docker buildx build -t platform-tools:latest .
+    DOCKER_BUILDKIT=1 docker buildx build --platform=$(build_platform) --progress=plain --pull --rm --build-arg CONTAINER=${CONTAINER} -t ${VER_TAG} --load .
+
+login:
+    aws ecr get-login-password ${profile_arg} --region ${REGION} | docker login --username AWS --password-stdin ${ECR_REGISTRY}
+
+publish:
+    docker tag ${ECR_REGISTRY}/${ECR_REPOSITORY}:${IMAGE_TAG} ${ECR_REGISTRY}/${ECR_REPOSITORY}:${IMAGE_TAG}
+	docker image push ${ECR_REGISTRY}/${ECR_REPOSITORY}:${IMAGE_TAG}
+
+check:
+    @( aws ecr describe-images ${profile_arg} --region ${REGION} --repository-name ${ECR_REPOSITORY} --image-ids imageTag=${IMAGE_TAG} 2> /dev/null > /dev/null && echo exists ) || echo free
+
+clean:
+	docker rmi ${ECR_REGISTRY}/${ECR_REPOSITORY}:${IMAGE_TAG}
+
+$(CONTAINER): $(login_dep)

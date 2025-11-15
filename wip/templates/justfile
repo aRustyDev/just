@@ -1,0 +1,21 @@
+run:
+    @go run ./main.go
+
+build:
+    @go build -C cmd/ ../main.go
+
+clean:
+    @rm -r ./cmd/*
+
+install:
+    @go install
+
+sync-configs:
+    @for c in `ls ./config | rg -o  -r '$1' "(.*)\.yaml"`; do \
+        yq -o=json '[.]' config/$c.yaml > config/$c.json; \
+    done;
+
+completions:
+    @templater completions zsh
+    @templater completions bash
+    @templater completions sh

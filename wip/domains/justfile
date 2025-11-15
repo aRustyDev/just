@@ -1,0 +1,34 @@
+root := `git rev-parse --show-toplevel`
+
+init:
+    brew install tenv
+    tenv terraform install
+    terraform init
+    terraform refresh
+
+build: fmt
+    terraform plan
+
+test:
+    terraform test
+
+deploy:
+    terraform apply
+
+destroy:
+    terraform destroy
+
+clean:
+    rm -rf "{{ root }}/.terraform"
+
+fmt:
+    terraform fmt -recursive
+
+check: fmt
+    terraform validate
+
+# Update either the target provider or default to ALL providers, recursively through the project
+update-providers provider="all" context="recursive":
+    echo "TODO"
+    echo "provider: {{ provider }}"
+    echo "target: {{ context }}"

@@ -1,0 +1,127 @@
+set unstable := true
+
+import 'scripts/just/ci.just'
+import 'scripts/just/cloud9.just'
+import 'scripts/just/common.just'
+import 'scripts/just/installs.just'
+import 'scripts/just/mcp.just'
+import 'scripts/just/packer.just'
+import 'scripts/just/ssh.just'
+
+# === === === === === === === === === === === === === === === === === === === === === === ===
+#  Recipes
+# === === === === === === === === === === === === === === === === === === === === === === ===
+
+# Initialize the repo (install deps + initialize tools)
+[group('core')]
+init: install
+    #!/usr/bin/env bash
+    # Generate default config file
+    echo "" | "{{ mustache }}" "{{ config_default_tmpl }}" > "{{ config }}"
+    # Hydrate templates w/ config.yaml
+    just config "tags"
+    just config "ssh"
+    just config "paths"
+    just hydrate
+    # just ssh-init
+    just packer-init
+
+# Hydrate templates w/ config.yaml
+[group('core')]
+hydrate:
+    @just config "tags-git"
+    @just hydrate-ssh
+
+# Build docs for the repo
+[group('core')]
+docs:
+    @just packer-docs
+
+# Build the AMI using Packer with resolved source and variable files.
+[group('core')]
+build d=distro: authn_aws hydrate
+    #!/usr/bin/env bash
+    # just hydrate-cloud9 "{{ d }}"
+    just update-config ".ec2.ami.distro" "{{ d }}"
+    just packer-build
+
+# Build ALL the AMIs listed in `<tbd>.yaml` using Packer.
+[group('core')]
+build-all: authn_aws hydrate
+    #!/usr/bin/env bash
+    for distro in $(yq e '.[]' "{{ root }}/data/distros.yaml"); do
+        just build "{{ distro }}"
+    done
+
+# List unique for 'target'.
+[group('core')]
+[group('list')]
+uniq target param="":
+    @just "ls-uniq-{{ if param != "" { target + " " + param } else { target } }}"
+
+# Update Config.yaml with 'target' (tags|paths)
+[group('core')]
+config target:
+    @just "config-{{ target }}"
+
+# Clean up generated files
+[group('core')]
+clean: packer-clean
+
+# Format/Lint+Fix all files in repository
+[group('core')]
+fmt: cspell
+    #!/usr/bin/env bash
+    just --fmt -f {{ root }}/justfile
+    for j in $(ls {{ root }}/scripts/just); do
+        just --fmt --unstable -f {{ root }}/scripts/just/$j
+    done
+    packer fmt "{{ root }}/packer/"
+
+test:
+    gitlab-ci-local
+
+[group('core')]
+image-build tag="local/ami-builder:dev":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if [ ! -f config/tools.lock.yaml ]; then
+        echo "ERROR: Missing lockfile config/tools.lock.yaml (run 'just lock-update')."
+        exit 1
+    fi
+    PACKER_VERSION=$(yq -r '.tools.packer.version' config/tools.lock.yaml)
+    AWSCLI_VERSION=$(yq -r '.tools.awscli.version' config/tools.lock.yaml)
+    docker build \
+      -f .ci/images/packer.Dockerfile \
+      --build-arg PACKER_VERSION="$PACKER_VERSION" \
+      --build-arg AWSCLI_VERSION="$AWSCLI_VERSION" \
+      -t "$tag" .
+
+[group('core')]
+lock-update:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    echo "TODO: implement version resolution (GitHub API, release pages)."
+    echo "Populate config/tools.lock.yaml with real versions + checksums."
+
+# Summary of what’s in place:
+# - Multi-stage build producing a minimal runtime image (non-root user packer).
+# - Tooling: packer, awscli (runtime), mustache, just, yq, jq 1.7, python3, moreutils, git, bash, unzip, tar, gzip.
+# - SBOM generation (syft, spdx, cyclonedx) retained in final image under /sbom.
+# - License aggregation scaffold under /etc/licenses (index placeholder).
+# - PACKER_LOG and PACKER_LOG_PATH enabled by default.
+# - EntryPoint restricts usage to init, build-all, build <distro>.
+# - Lockfile schema ready; version/checksum fields empty for future population via the planned lock-update recipe.
+
+# Next Steps (optional):
+# - Implement the `lock-update` recipe to auto-populate versions & checksums.
+# - Populate config/tools.lock.yaml with current versions before first image build.
+# - Enhance license index by parsing SBOM license fields (future improvement).
+# - Add CI job (when desired) to build & push the image using `just image-build`.
+
+# Let me know if you’d like me to:
+# 1. Draft the `lock-update` automation.
+# 2. Add a `license-index` recipe to populate licenses/components.
+# 3. Provide instructions for building and testing locally with docker.
+
+# Tell me what you want next and I can proceed.

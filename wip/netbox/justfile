@@ -1,0 +1,20 @@
+
+broadcast := `sipcalc 100.90.96.0/19 | rg -o -r '$2' "(Broadcast).*?([\d\.]+)"`
+ips cidr:
+    @sipcalc "{{cidr}}"
+
+# -[ipv4 : 100.90.96.0/19] - 0
+
+# [CIDR]
+# Host address            - 100.90.96.0
+# Host address (decimal)  - 1683644416
+# Host address (hex)      - 645A6000
+# Network address         - 100.90.96.0
+# Network mask            - 255.255.224.0
+# Network mask (bits)     - 19
+# Network mask (hex)      - FFFFE000
+# Broadcast address       - 100.90.127.255
+# Cisco wildcard          - 0.0.31.255
+# Addresses in network    - 8192
+# Network range           - 100.90.96.0 - 100.90.127.255
+# Usable range            - 100.90.96.1 - 100.90.127.254

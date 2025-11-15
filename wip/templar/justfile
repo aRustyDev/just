@@ -1,0 +1,26 @@
+run target:
+    @go run . "{{ target }}"
+
+build:
+    @go build -o templar
+
+clean:
+    @rm templar
+
+install:
+    @go install
+
+sync-configs:
+    @for c in `ls ./config | rg -o  -r '$1' "(.*)\.yaml"`; do \
+        yq -o=json '.' config/$c.yaml > config/$c.json; \
+    done;
+
+docs:
+    @go run ./internal/tools/docgen -out ./docs/cli -format markdown
+
+# aws-sso
+# -> get AWS Alias
+# check user config
+# -> update REPO(DOCS) w/ Alias ID
+# check Netbox for IPs
+# -> sync IPs across

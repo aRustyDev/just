@@ -1,0 +1,52 @@
+pyv := "3.13"
+
+# Install prerequisites for the repo
+install-prereqs:
+    @echo "Installing prerequisites..."
+    brew list pyenv >/dev/null 2>&1 || brew install pyenv
+    pyenv install "{{pyv}}"
+    pyenv install 3.13
+    pyenv init - zsh
+    python -m pip install --upgrade pip
+    pip3 install -r requirements.txt
+    pip3 install virtualenvwrapper
+    pip3 install pproxy
+    pip3 install virtualenv
+
+# Setup the Venv and run mkdocs locally.
+serve: install-prereqs
+    #!/usr/bin/env bash
+    virtualenv venv
+    source ./venv/bin/activate
+    pip install -r requirements.txt
+    mkdocs serve
+    deactivate
+
+lint-all:
+    pre-commit run --all-files
+
+install-prerequisites-forlint:
+    brew install shfmt
+    brew install shellcheck
+    pip install pre-commit
+    pre-commit install --install-hooks --overwrite
+    pre-commit autoupdate
+
+# WIP: Do Not Use yet
+lint:
+    pre-commit run
+    markdown-link-check --quiet -c .markdown-link-check.json $(git ls-files | grep "\.md$")
+    editorconfig-checker
+    markdownlint
+    markdown-table-formatter
+    git_diff
+
+lint-all:
+    pre-commit run --all-files
+
+install-prerequisites-forlint:
+    brew install shfmt
+    brew install shellcheck
+    pip install pre-commit
+    pre-commit install --install-hooks --overwrite
+    pre-commit autoupdate

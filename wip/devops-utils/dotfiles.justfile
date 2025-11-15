@@ -1,0 +1,136 @@
+root := `git rev-parse --show-toplevel`
+region := env("AWS_REGION", "us-east-1")
+bastion_ssh_proxy := "9876"
+combine_ssh_proxy := "9001"
+proxying_bastion := shell("lsof", "-i", ":" + bastion_ssh_proxy)
+proxying_combine := shell("lsof", "-i", ":" + combine_ssh_proxy)
+
+_prerequisites target:
+    #!/usr/bin/env bash
+    case EXPRESSION in
+        auth-aws)
+            brew install awscli
+            brew install google-chrome
+            ;;
+        config-kube)
+            brew install awscli
+            brew install kubectl
+            ;;
+        kube-set-*)
+            brew install kubectl
+            brew install kubectx
+            brew install kubens
+            ;;
+        config-ssh)
+            brew install golang
+            go install github.com/cbroglie/mustache/cmd/mustache@latest
+            ;;
+        open-netbox)
+            brew install firefox
+            ;;
+        *)
+            brew install helm
+            brew install glab
+            brew install lychee
+            brew install markdownlint-cli2
+            npm install -g markdown-link-check
+            just _prerequisites auth-aws
+            just _prerequisites config-kube
+            just _prerequisites kube-set-any
+            just _prerequisites config-ssh
+            just _prerequisites open-netbox
+            ;;
+    esac
+
+_recommended:
+    brew install starship
+    brew install atuin
+
+# aws-sso init
+auth-aws: (_prerequisites "auth-aws")
+    aws-sso -f ~/.config/aws-sso/gov.yaml
+
+config-kube: (_prerequisites "config-kube")
+    #!/usr/bin/env bash
+    if ! aws sts get-caller-identity >/dev/null 2>&1; then
+        just auth-aws
+    else
+        for p in `aws configure list-profiles`; do
+            PROF_CLSTR=`aws eks list-clusters --profile $p | jq -r '.clusters[]'`
+            if [ $(echo $PROF_CLSTR | wc -l) -ge 1 ]; then
+                for c in `aws eks list-clusters --profile $p | jq -r '.clusters[]'`; do
+                    URL=`aws eks describe-cluster --profile $p --name $c | jq -r '.cluster.endpoint'`
+                    aws eks describe-cluster --profile $p --name $c | jq -r '.cluster.certificateAuthority.data' | base64 -d > /tmp/ca.crt
+                    just kube-set-user "$p" $c "{{region}}"
+                    just kube-set-cluster "$c" "$URL" "/tmp/ca.crt"
+                    just kube-set-ctx $p $c
+                done
+            fi
+        done
+    fi
+
+kube-set-cluster cluster url ca: (_prerequisites "kube-set-cluster")
+    @kubectl config set-cluster "{{cluster}}" \
+        --proxy-url='socks5://localhost:9876' \
+        --server="{{url}}" \
+        --embed-certs \
+        --certificate-authority="{{ca}}"
+
+kube-set-ctx profile cluster: (_prerequisites "kube-set-ctx")
+    @kubectl config set-context "{{profile}}@{{cluster}}" \
+        --cluster="{{cluster}}" \
+        --current=false \
+        --user="{{profile}}@{{cluster}}"
+
+kube-set-user profile cluster region: (_prerequisites "kube-set-user")
+    @kubectl config set-credentials "{{profile}}@{{cluster}}" \
+        --exec-command=aws \
+        --exec-api-version=client.authentication.k8s.io/v1beta1 \
+        --exec-arg='--region' \
+        --exec-arg="{{region}}" \
+        --exec-arg='eks' \
+        --exec-arg='get-token' \
+        --exec-arg='--cluster-name' \
+        --exec-arg="{{cluster}}" \
+        --exec-arg='--output' \
+        --exec-arg='json' \
+        --exec-env="AWS_PROFILE={{profile}}" \
+        --exec-interactive-mode='IfAvailable' \
+        --embed-certs=false \
+        --exec-provide-cluster-info=false
+
+config-ssh: (_prerequisites "config-ssh")
+    @echo "{user: $(whoami), bastion: {{bastion_ssh_proxy}}, combine: {{combine_ssh_proxy}}}" | mustache {{root}}/dotfiles/local/ssh/config > ~/.ssh/config
+
+# options: [eng, combine]
+start-proxy target:
+    @echo "Starting SSH proxy for {{target}} and backgrounding it."
+    @ssh -f -N {{target}}-bastion && echo "- [x] Success" || echo "- [ ] Failure"
+
+open-netbox: (_prerequisites "open-netbox")
+    @just check-proxy eng || just start-proxy eng
+    @open -a Firefox --args -P "netbox-proxy" || echo "Error: See https://docs.map.cisco/map-tech/tools/netbox/sops/how-to-proxy-to-netbox.html#setup for directions"
+
+# options: [eng, combine]
+check-proxy target:
+    @lsof -O -i :$(just --evaluate {{target}}_ssh_proxy) | tail -n +2 | egrep -o "^ssh.*$(whoami)" || exit 1
+
+test target:
+    @echo "Running tests..."
+    @echo sudo lsof -O -i :$(just --evaluate {{target}}_ssh_proxy)
+
+config-glab:
+    echo "Create a PAT: https://sscm.gus.cisco.com/-/user_settings/personal_access_tokens"
+    mkdir -p ~/.config/glab
+    cp {{root}}/dotfiles/local/glab-cli/config.yml ~/.config/glab-cli/config.yml
+    glab config set -h sscm.gus.cisco.com git_protocol ssh
+    glab config set -h sscm.gus.cisco.com api_protocol https
+    glab auth login
+
+clean-git:
+    git stash save "just: stashing while cleaning up"
+    git checkout main
+    git branch --v | grep "\[gone\]" | awk '{print $1}' | xargs git branch -D
+    git fetch origin --prune
+    git checkout main
+    git pop

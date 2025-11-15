@@ -1,0 +1,24 @@
+install:
+    @cargo install mdbook
+    @cargo install mdbook-man
+    @cargo install mdbook-texi
+    @cargo install mdbook-repl
+    @cargo install mdbook-test
+    @cargo install mdbook-yapp
+    @cargo install mdbook-typst
+    @cargo install mdbook-keeper
+    @cargo install mdbook-pandoc
+    @cargo install mdbook-pagetoc
+    @cargo install mdbook-mermaid # mdbook-neptune
+    @cargo install mdbook-journal
+    @cargo install mdbook-indexing
+    @cargo install mdbook-footnote
+    @cargo install mdbook-embedify
+    @cargo install mdbook-admonish
+    @cargo install mdbook-linkcheck
+    @cargo install mdbook-whichlang
+    @cargo install mdbook-webinclude
+    @cargo install mdbook-i18n-helpers
+    @cargo install mdbook-anchors-aweigh
+    @cargo install mdbook-inline-highlighting
+    @cargo install mdbook-force-relative-links

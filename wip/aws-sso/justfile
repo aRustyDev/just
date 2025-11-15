@@ -1,0 +1,48 @@
+NS := "gitlab"
+CFGDIR := "/Users/adamsm/.config/gitlab/runner"
+RELEASE := "gitlab-runner"
+URL := "https://sscm.gus.cisco.com"
+
+podName := `kubectl get pods -n gitlab -l app=gitlab-runner -o json | jq -r '.items[0].metadata.name'`
+
+# TODO: setup K8s secret creation method for runner-token and runner-registration-token
+setup-runner:
+    helm repo add gitlab https://charts.gitlab.io
+    helm repo update gitlab
+    kubectl create namespace gitlab
+    kubectl apply -f "{{CFGDIR}}/rbac.yaml"
+    op run --env-file .env -- kubectl create secret docker-registry sscm-registry \
+        --docker-server=registry.sscm.gus.cisco.com \
+        --docker-username=SSCM_USER \
+        --docker-password=SSCM_PAT \
+        --docker-email=SSCM_EMAIL \
+        -n gitlab
+    # op run --env-file .env -- kubectl create secret generic runner-token \
+    #     --docker-server=registry.sscm.gus.cisco.com \
+    #     --docker-username=SSCM_USER \
+    #     --docker-password=SSCM_PAT \
+    #     --docker-email=SSCM_EMAIL \
+    #     -n gitlab
+    # op run --env-file .env -- kubectl create secret generic runner-registration-token \
+    #     --docker-server=registry.sscm.gus.cisco.com \
+    #     --docker-username=SSCM_USER \
+    #     --docker-password=SSCM_PAT \
+    #     --docker-email=SSCM_EMAIL \
+    #     -n gitlab
+
+runner: setup-runner
+    helm install --create-namespace --namespace "{{NS}}" "{{RELEASE}}" -f "{{CFGDIR}}/values.yaml" gitlab/gitlab-runner
+# CONFIG_FILE=$HOME/.config/gitlab/runner/config.toml gitlab-runner
+
+update:
+    helm upgrade --namespace "{{NS}}" -f "{{CFGDIR}}/values.yaml" "{{RELEASE}}" gitlab/gitlab-runner
+
+show:
+    @echo "#############################################################################################"
+    helm list --all-namespaces
+    @echo "#############################################################################################"
+    helm status --namespace "{{NS}}" "{{RELEASE}}"
+
+clean:
+    helm uninstall --namespace "{{NS}}" "{{RELEASE}}"
+    kubectl delete namespace "{{NS}}" || true
