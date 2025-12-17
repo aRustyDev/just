@@ -1,21 +1,348 @@
-run:
-    @go run ./main.go
+gists := """
+    {
+        "common":"3d2a93d76c023eba50a2d037e36cf28e",
+        "github": "c60f1e34d9d2afdc78f9383abad01108",
+        "github_workflows": "a1c2a0a87b3fd9ca22f369198058b8f4",
+        "github_rulesets": "ddb7525aa0b31d30415cbce2eb36bf59",
+        "prs": "c890c91c827d4e740d14bd7f6aaa1f3a",
+        "issues": "dc4f23113068929cd248a2bfeffa9ed5",
+        "obsidian": "f23693cb0b5e49d592beef42e318f060",
+        "obsidian_templates": "9d81174c1a85b6052407efd1f384f672",
+        "obsidian_fileclasses": "989c0b071a3572073652aea8ed8c2809",
+        "obsidian_plugin_zettelflow": "1ece174a91f4c790eb86b9d7bfb7789d",
+        "obsidian_plugin_updatetimeonedit": "e7dfc35e1685e217116e9257655e34ed",
+        "obsidian_plugin_templater": "bb535c91f4ad51bd8d30515c1eaf619c",
+        "obsidian_plugin_tableeditor": "65e5ddeaaedd0ce9e561660f6522cbeb",
+        "obsidian_plugin_tasks": "9b54978f99897045280cf16b8f1c802d",
+        "obsidian_plugin_reminder": "8d2174e7887114259eae16896984b9ee",
+        "obsidian_plugin_linter": "e340011f0b21b3ca5931496b868a5472",
+        "obsidian_plugin_kanban": "1fe702fd8855384129967005c0819973",
+        "obsidian_plugin_git": "fd6e1415182a85907ca5e3671c18ee68",
+        "obsidian_plugin_frontmattertitle": "d5869c2cb401dac8af94b6bd27838a82",
+        "obsidian_plugin_checklists": "849fb957a3950f15b8f4a86cdd406ebb",
+        "obsidian_plugin_charts": "1f3b8ac98e9d804769f5c8dd5fab9858",
+        "obsidian_plugin_metadatamenu": "ec63df54308019ddcca5058c4a340b50",
+        "obsidian_plugin_mermaidtools": "84929766f614e94d5e24175620b8d0aa",
+        "obsidian_plugin_graphanalysis": "4bd3a55b3b61f5a10629263492fa22b3",
+        "obsidian_plugin_dataview": "643205925a505323e62a8f10e4c4c326",
+        "obsidian_plugin_calendar": "dc72e5551971734ee931e170a00ae227",
+        "obsidian_plugin_excalidraw": "1b04fc968abf7c21165ae162fc32a2f9",
+    }
+    """
 
-build:
-    @go build -C cmd/ ../main.go
+# Get a template from github gists ['common']
+[group('template')]
+get-template gist_id file:
+    gh gist view --files "$(jq -r --null-input '{{ replace_regex(gists, "\\s", "") }} | .{{ gist_id }}')" --filename "{{ file }}" -r
 
-clean:
-    @rm -r ./cmd/*
+# List files included in github <gist> (if empty shows options)
+[group('template')]
+ls-template gist="":
+    #!/usr/bin/env bash
+    if gist != ""; then
+        gh gist view --files "$(jq -r --null-input '{{ replace_regex(gists, "\\s", "") }} | .{{ gist }}')" | tr ' ' '\n'
+    else
+        echo "===[ CONFIGURED ]==="
+        jq --null-input '{{ replace_regex(gists, "\\s", "") }} | keys | .[]'
+        echo "===[  EXISTING  ]==="
+        gh gist list --public -L 50 --filter templates | awk -F '\t' '{print $2}'
+    fi
 
-install:
-    @go install
+[group('template')]
+init target:
+    @just -f "{{ justfile() }}" "templates-{{ target }}"
 
-sync-configs:
-    @for c in `ls ./config | rg -o  -r '$1' "(.*)\.yaml"`; do \
-        yq -o=json '[.]' config/$c.yaml > config/$c.json; \
-    done;
+# Creates the dir structure and placeholder files for github
+[group('github')]
+[private]
+mktree-github:
+    mkdir -p .github/{rulesets,workflows,ISSUE_TEMPLATE,pull-requests}
+    touch .github/{rulesets,workflows,ISSUE_TEMPLATE,pull-requests}/.gitkeep
 
-completions:
-    @templater completions zsh
-    @templater completions bash
-    @templater completions sh
+# Creates the dir structure and placeholder files for obsidian
+[group('obsidian')]
+[private]
+mktree-obsdian:
+    mkdir -p .obsidian/{fileClasses,plugins,templates}
+    touch .obsidian/{fileClasses,plugins,templates}/.gitkeep
+
+# Initialize a github repo
+[group('github')]
+[group('template')]
+[parallel]
+[private]
+templates-github: mktree-github
+    @just -f "{{ justfile() }}" get-template "common" "CODE_OF_CONDUCT.md" > CODE_OF_CONDUCT.md
+    @just -f "{{ justfile() }}" get-template "common" "CONTRIBUTING.md" > CONTRIBUTING.md
+    @just -f "{{ justfile() }}" get-template "common" "gitattributes" > .gitattributes
+    @just -f "{{ justfile() }}" get-template "common" "CHANGELOG.md" > CHANGELOG.md
+    @just -f "{{ justfile() }}" get-template "common" "SECURITY.md" > SECURITY.md
+    @just -f "{{ justfile() }}" get-template "common" "CODEOWNERS" > .github/CODEOWNERS
+    @just -f "{{ justfile() }}" get-template "common" "gitignore" > .gitignore
+    @just -f "{{ justfile() }}" get-template "github" "release-drafter.yml" > .github/release-drafter.yml
+    @just -f "{{ justfile() }}" get-template "github" "FUNDING.yml" > .github/FUNDING.yml
+    @just -f "{{ justfile() }}" get-template "github" "labels.yml" > .github/labels.yml
+    @just -f "{{ justfile() }}" get-template "github_workflows" "project-automation.yml" > .github/workflows/project-automation.yml
+    @just -f "{{ justfile() }}" get-template "github_workflows" "dependency-review.yml" > .github/workflows/dependency-review.yml
+    @just -f "{{ justfile() }}" get-template "github_workflows" "release-drafter.yml" > .github/workflows/release-drafter.yml
+    @just -f "{{ justfile() }}" get-template "github_workflows" "release-bundle.yml" > .github/workflows/release-bundle.yml
+    @just -f "{{ justfile() }}" get-template "github_workflows" "secret-scanner.yml" > .github/workflows/secret-scanner.yml
+    @just -f "{{ justfile() }}" get-template "github_workflows" "mdbook-build.yml" > .github/workflows/mdbook-build.yml
+    @just -f "{{ justfile() }}" get-template "github_workflows" "issue-triage.yml" > .github/workflows/issue-triage.yml
+    @just -f "{{ justfile() }}" get-template "github_workflows" "label-sync.yml" > .github/workflows/label-sync.yml
+    @just -f "{{ justfile() }}" get-template "github_workflows" "hadolint.yml" > .github/workflows/hadolint.yml
+    @just -f "{{ justfile() }}" get-template "github_workflows" "stale.yml" > .github/workflows/stale.yml
+    @just -f "{{ justfile() }}" get-template "github_rulesets" "integration-branch-protection.json" > .github/rulesets/integration-branch-protection.json
+    @just -f "{{ justfile() }}" get-template "github_rulesets" "integration-pr-reviews.json" > .github/rulesets/integration-pr-reviews.json
+    @just -f "{{ justfile() }}" get-template "github_rulesets" "main-branch-protection.json" > .github/rulesets/main-branch-protection.json
+    @just -f "{{ justfile() }}" get-template "github_rulesets" "main-pr-reviews.json" > .github/rulesets/main-pr-reviews.json
+
+[group('obsidian')]
+[group('template')]
+[parallel]
+[private]
+templates-obsidian: mktree-obsdian
+    @just -f "{{ justfile() }}" templates-obsidian-root
+    @just -f "{{ justfile() }}" templates-obsidian-templates
+    @just -f "{{ justfile() }}" templates-obsidian-plugins
+    @just -f "{{ justfile() }}" templates-obsidian-fileclasses
+
+[group('obsidian')]
+[group('template')]
+[parallel]
+[private]
+templates-obsidian-root:
+    @just -f "{{ justfile() }}" get-template "obsidian" "daily-notes.json" > .obsidian/daily-notes.json
+    @just -f "{{ justfile() }}" get-template "obsidian" "appearance.json" > .obsidian/appearance.json
+    @just -f "{{ justfile() }}" get-template "obsidian" "types.json" > .obsidian/types.json
+    @just -f "{{ justfile() }}" get-template "obsidian" "gitignore" > .obsidian/.gitignore
+    @just -f "{{ justfile() }}" get-template "obsidian" "app.json" > .obsidian/app.json
+
+[group('obsidian')]
+[group('template')]
+[parallel]
+[private]
+templates-obsidian-templates:
+    @just -f "{{ justfile() }}" get-template "obsidian_templates" "adr" > .obsidian/templates/adr
+    @just -f "{{ justfile() }}" get-template "obsidian_templates" "ai-rules" > .obsidian/templates/ai-rules
+    @just -f "{{ justfile() }}" get-template "obsidian_templates" "BRD" > .obsidian/templates/BRD
+    @just -f "{{ justfile() }}" get-template "obsidian_templates" "bug-report" > .obsidian/templates/bug-report
+    @just -f "{{ justfile() }}" get-template "obsidian_templates" "changelog" > .obsidian/templates/changelog
+    @just -f "{{ justfile() }}" get-template "obsidian_templates" "cheatsheet" > .obsidian/templates/cheatsheet
+    @just -f "{{ justfile() }}" get-template "obsidian_templates" "cornell-note" > .obsidian/templates/cornell-note
+    @just -f "{{ justfile() }}" get-template "obsidian_templates" "daily" > .obsidian/templates/daily
+    @just -f "{{ justfile() }}" get-template "obsidian_templates" "dashboard" > .obsidian/templates/dashboard
+    @just -f "{{ justfile() }}" get-template "obsidian_templates" "doc-note" > .obsidian/templates/doc-note
+    @just -f "{{ justfile() }}" get-template "obsidian_templates" "experiment" > .obsidian/templates/experiment
+    @just -f "{{ justfile() }}" get-template "obsidian_templates" "FRD" > .obsidian/templates/FRD
+    @just -f "{{ justfile() }}" get-template "obsidian_templates" "guide" > .obsidian/templates/guide
+    @just -f "{{ justfile() }}" get-template "obsidian_templates" "hypothesis" > .obsidian/templates/hypothesis
+    @just -f "{{ justfile() }}" get-template "obsidian_templates" "issue" > .obsidian/templates/issue
+    @just -f "{{ justfile() }}" get-template "obsidian_templates" "meeting-note" > .obsidian/templates/meeting-note
+    @just -f "{{ justfile() }}" get-template "obsidian_templates" "note" > .obsidian/templates/note
+    @just -f "{{ justfile() }}" get-template "obsidian_templates" "plan" > .obsidian/templates/plan
+    @just -f "{{ justfile() }}" get-template "obsidian_templates" "PRD" > .obsidian/templates/PRD
+    @just -f "{{ justfile() }}" get-template "obsidian_templates" "reference" > .obsidian/templates/reference
+    @just -f "{{ justfile() }}" get-template "obsidian_templates" "research" > .obsidian/templates/research
+    @just -f "{{ justfile() }}" get-template "obsidian_templates" "roadmap" > .obsidian/templates/roadmap
+    @just -f "{{ justfile() }}" get-template "obsidian_templates" "runbook" > .obsidian/templates/runbook
+    @just -f "{{ justfile() }}" get-template "obsidian_templates" "slide" > .obsidian/templates/slide
+    @just -f "{{ justfile() }}" get-template "obsidian_templates" "todo-file" > .obsidian/templates/todo-file
+    @just -f "{{ justfile() }}" get-template "obsidian_templates" "tutorial" > .obsidian/templates/tutorial
+
+[group('obsidian')]
+[group('plugin')]
+[group('template')]
+[parallel]
+[private]
+templates-obsidian-plugins:
+    @just -f "{{ justfile() }}" templates-obsidian-plugin-calendar
+    @just -f "{{ justfile() }}" templates-obsidian-plugin-charts
+    @just -f "{{ justfile() }}" templates-obsidian-plugin-checklists
+    @just -f "{{ justfile() }}" templates-obsidian-plugin-dataview
+    @just -f "{{ justfile() }}" templates-obsidian-plugin-excalidraw
+    @just -f "{{ justfile() }}" templates-obsidian-plugin-frontmattertitle
+    @just -f "{{ justfile() }}" templates-obsidian-plugin-git
+    @just -f "{{ justfile() }}" templates-obsidian-plugin-graphanalysis
+    @just -f "{{ justfile() }}" templates-obsidian-plugin-kanban
+    @just -f "{{ justfile() }}" templates-obsidian-plugin-linter
+    @just -f "{{ justfile() }}" templates-obsidian-plugin-mermaidtools
+    @just -f "{{ justfile() }}" templates-obsidian-plugin-metadatamenu
+    @just -f "{{ justfile() }}" templates-obsidian-plugin-reminder
+    @just -f "{{ justfile() }}" templates-obsidian-plugin-tableeditor
+    @just -f "{{ justfile() }}" templates-obsidian-plugin-tasks
+    @just -f "{{ justfile() }}" templates-obsidian-plugin-templater
+    @just -f "{{ justfile() }}" templates-obsidian-plugin-updatetimeonedit
+    @just -f "{{ justfile() }}" templates-obsidian-plugin-zettelflow
+
+[group('obsidian')]
+[group('plugin')]
+[group('template')]
+[parallel]
+[private]
+templates-obsidian-plugin-calendar:
+    @just -f "{{ justfile() }}" get-template "obsidian_plugin_calendar" "calendar/data.json" > plugins/calendar/data.json
+    @just -f "{{ justfile() }}" get-template "obsidian_plugin_calendar" "calendar/manifest.json" > plugins/calendar/manifest.json
+
+[group('obsidian')]
+[group('plugin')]
+[group('template')]
+[parallel]
+[private]
+templates-obsidian-plugin-dataview:
+    @just -f "{{ justfile() }}" get-template "obsidian_plugin_dataview" "dataview/data.json" > plugins/dataview/data.json
+    @just -f "{{ justfile() }}" get-template "obsidian_plugin_dataview" "dataview/manifest.json" > plugins/dataview/manifest.json
+
+[group('obsidian')]
+[group('plugin')]
+[group('template')]
+[parallel]
+[private]
+templates-obsidian-plugin-graphanalysis:
+    @just -f "{{ justfile() }}" get-template "obsidian_plugin_graphanalysis" "graph-analysis/manifest.json" > plugins/graph-analysis/manifest.json
+
+[group('obsidian')]
+[group('plugin')]
+[group('template')]
+[parallel]
+[private]
+templates-obsidian-plugin-mermaidtools:
+    @just -f "{{ justfile() }}" get-template "obsidian_plugin_mermaidtools" "mermaid-tools/manifest.json" > plugins/mermaid-tools/manifest.json
+
+[group('obsidian')]
+[group('plugin')]
+[group('template')]
+[parallel]
+[private]
+templates-obsidian-plugin-metadatamenu:
+    @just -f "{{ justfile() }}" get-template "obsidian_plugin_metadatamenu" "metadata-menu/data.json" > plugins/metadata-menu/data.json
+    @just -f "{{ justfile() }}" get-template "obsidian_plugin_metadatamenu" "metadata-menu/manifest.json" > plugins/metadata-menu/manifest.json
+
+[group('obsidian')]
+[group('plugin')]
+[group('template')]
+[parallel]
+[private]
+templates-obsidian-plugin-charts:
+    @just -f "{{ justfile() }}" get-template "obsidian_plugin_charts" "obsidian-charts/manifest.json" > plugins/obsidian-charts/manifest.json
+
+[group('obsidian')]
+[group('plugin')]
+[group('template')]
+[parallel]
+[private]
+templates-obsidian-plugin-checklists:
+    @just -f "{{ justfile() }}" get-template "obsidian_plugin_checklists" "obsidian-checklist-plugin/manifest.json" > plugins/obsidian-checklist-plugin/manifest.json
+
+[group('obsidian')]
+[group('plugin')]
+[group('template')]
+[parallel]
+[private]
+templates-obsidian-plugin-excalidraw:
+    @just -f "{{ justfile() }}" get-template "obsidian_plugin_excalidraw" "obsidian-excalidraw-plugin/manifest.json" > plugins/obsidian-excalidraw-plugin/manifest.json
+
+[group('obsidian')]
+[group('plugin')]
+[group('template')]
+[parallel]
+[private]
+templates-obsidian-plugin-frontmattertitle:
+    @just -f "{{ justfile() }}" get-template "obsidian_plugin_frontmattertitle" "obsidian-front-matter-title-plugin/manifest.json" > plugins/obsidian-front-matter-title-plugin/manifest.json
+
+[group('obsidian')]
+[group('plugin')]
+[group('template')]
+[parallel]
+[private]
+templates-obsidian-plugin-git:
+    @just -f "{{ justfile() }}" get-template "obsidian_plugin_git" "obsidian-git/data.json" > plugins/obsidian-git/data.json
+    @just -f "{{ justfile() }}" get-template "obsidian_plugin_git" "obsidian-git/manifest.json" > plugins/obsidian-git/manifest.json
+    @just -f "{{ justfile() }}" get-template "obsidian_plugin_git" "obsidian-git/obsidian_askpass.sh" > plugins/obsidian-git/obsidian_askpass.sh
+
+[group('obsidian')]
+[group('plugin')]
+[group('template')]
+[parallel]
+[private]
+templates-obsidian-plugin-kanban:
+    @just -f "{{ justfile() }}" get-template "obsidian_plugin_kanban" "obsidian-kanban/manifest.json" > plugins/obsidian-kanban/manifest.json
+
+[group('obsidian')]
+[group('plugin')]
+[group('template')]
+[parallel]
+[private]
+templates-obsidian-plugin-linter:
+    @just -f "{{ justfile() }}" get-template "obsidian_plugin_linter" "obsidian-linter/data.json" > plugins/obsidian-linter/data.json
+    @just -f "{{ justfile() }}" get-template "obsidian_plugin_linter" "obsidian-linter/manifest.json" > plugins/obsidian-linter/manifest.json
+
+[group('obsidian')]
+[group('plugin')]
+[group('template')]
+[parallel]
+[private]
+templates-obsidian-plugin-reminder:
+    @just -f "{{ justfile() }}" get-template "obsidian_plugin_reminder" "obsidian-reminder-plugin/data.json" > plugins/obsidian-reminder-plugin/data.json
+    @just -f "{{ justfile() }}" get-template "obsidian_plugin_reminder" "obsidian-reminder-plugin/manifest.json" > plugins/obsidian-reminder-plugin/manifest.json
+
+[group('obsidian')]
+[group('plugin')]
+[group('template')]
+[parallel]
+[private]
+templates-obsidian-plugin-tasks:
+    @just -f "{{ justfile() }}" get-template "obsidian_plugin_tasks" "obsidian-tasks-plugin/data.json" > plugins/obsidian-tasks-plugin/data.json
+    @just -f "{{ justfile() }}" get-template "obsidian_plugin_tasks" "obsidian-tasks-plugin/manifest.json" > plugins/obsidian-tasks-plugin/manifest.json
+
+[group('obsidian')]
+[group('plugin')]
+[group('template')]
+[parallel]
+[private]
+templates-obsidian-plugin-tableeditor:
+    @just -f "{{ justfile() }}" get-template "obsidian_plugin_tableeditor" "table-editor-obsidian/data.json" > plugins/table-editor-obsidian/data.json
+    @just -f "{{ justfile() }}" get-template "obsidian_plugin_tableeditor" "table-editor-obsidian/manifest.json" > plugins/table-editor-obsidian/manifest.json
+
+[group('obsidian')]
+[group('plugin')]
+[group('template')]
+[parallel]
+[private]
+templates-obsidian-plugin-templater:
+    @just -f "{{ justfile() }}" get-template "obsidian_plugin_templater" "templater-obsidian/data.json" > plugins/templater-obsidian/data.json
+    @just -f "{{ justfile() }}" get-template "obsidian_plugin_templater" "templater-obsidian/manifest.json" > plugins/templater-obsidian/manifest.json
+
+[group('obsidian')]
+[group('plugin')]
+[group('template')]
+[parallel]
+[private]
+templates-obsidian-plugin-updatetimeonedit:
+    @just -f "{{ justfile() }}" get-template "obsidian_plugin_updatetimeonedit" "update-time-on-edit/data.json" > plugins/update-time-on-edit/data.json
+    @just -f "{{ justfile() }}" get-template "obsidian_plugin_updatetimeonedit" "update-time-on-edit/manifest.json" > plugins/update-time-on-edit/manifest.json
+
+[group('obsidian')]
+[group('plugin')]
+[group('template')]
+[parallel]
+[private]
+templates-obsidian-plugin-zettelflow:
+    @just -f "{{ justfile() }}" get-template "obsidian_plugin_zettelflow" "zettelflow/data.json" > plugins/zettelflow/data.json
+    @just -f "{{ justfile() }}" get-template "obsidian_plugin_zettelflow" "zettelflow/manifest.json" > plugins/zettelflow/manifest.json
+
+[group('obsidian')]
+[group('plugin')]
+[group('template')]
+[parallel]
+[private]
+templates-obsidian-fileclasses:
+    @just -f "{{ justfile() }}" get-template "obsidian_fileclasses" "adr.md" > .obsidian/fileClasses/adr.md
+    @just -f "{{ justfile() }}" get-template "obsidian_fileclasses" "ai-rules.md" > .obsidian/fileClasses/ai-rules.md
+    @just -f "{{ justfile() }}" get-template "obsidian_fileclasses" "doc-note.md" > .obsidian/fileClasses/doc-note.md
+    @just -f "{{ justfile() }}" get-template "obsidian_fileclasses" "journal.md" > .obsidian/fileClasses/journal.md
+    @just -f "{{ justfile() }}" get-template "obsidian_fileclasses" "plan.md" > .obsidian/fileClasses/plan.md
+    @just -f "{{ justfile() }}" get-template "obsidian_fileclasses" "prd.md" > .obsidian/fileClasses/prd.md
+    @just -f "{{ justfile() }}" get-template "obsidian_fileclasses" "research.md" > .obsidian/fileClasses/research.md
+    @just -f "{{ justfile() }}" get-template "obsidian_fileclasses" "runbook.md" > .obsidian/fileClasses/runbook.md
+    @just -f "{{ justfile() }}" get-template "obsidian_fileclasses" "todo-file.md" > .obsidian/fileClasses/todo-file.md
