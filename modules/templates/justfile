@@ -1,6 +1,9 @@
+# Template management using GitHub Gists
+# Each gist contains a justfile that handles its own installation
+
 gists := """
     {
-        "common":"3d2a93d76c023eba50a2d037e36cf28e",
+        "common": "3d2a93d76c023eba50a2d037e36cf28e",
         "github": "c60f1e34d9d2afdc78f9383abad01108",
         "github_workflows": "a1c2a0a87b3fd9ca22f369198058b8f4",
         "github_rulesets": "ddb7525aa0b31d30415cbce2eb36bf59",
@@ -26,323 +29,237 @@ gists := """
         "obsidian_plugin_graphanalysis": "4bd3a55b3b61f5a10629263492fa22b3",
         "obsidian_plugin_dataview": "643205925a505323e62a8f10e4c4c326",
         "obsidian_plugin_calendar": "dc72e5551971734ee931e170a00ae227",
-        "obsidian_plugin_excalidraw": "1b04fc968abf7c21165ae162fc32a2f9",
+        "obsidian_plugin_excalidraw": "1b04fc968abf7c21165ae162fc32a2f9"
     }
     """
+cwd := invocation_directory()
 
-# Get a template from github gists ['common']
-[group('template')]
-get-template gist_id file:
-    @gh gist view --files "$(jq -r --null-input '{{ replace_regex(gists, "\\s", "") }} | .{{ gist_id }}')" --filename "{{ file }}" -r
+[private]
+default:
+    @just --list --unsorted
 
-# List files included in github <gist> "{{ invocation_directory() }}/(if empty shows options)"
+# ============================================================================
+# Core Template Operations
+# ============================================================================
+# Apply a template from a gist (clones gist and runs its justfile)
+
+# Use --dry-run to preview what would be installed
 [group('template')]
-ls-template gist="":
+apply-gist gist_id *FLAGS:
     #!/usr/bin/env bash
-    if gist != ""; then
-        gh gist view --files "$(jq -r --null-input '{{ replace_regex(gists, "\\s", "") }} | .{{ gist }}')" | tr ' ' '\n'
-    else
-        echo "===[ CONFIGURED ]==="
-        jq --null-input '{{ replace_regex(gists, "\\s", "") }} | keys | .[]'
-        echo "===[  EXISTING  ]==="
-        gh gist list --public -L 50 --filter templates | awk -F '\t' '{print $2}'
+    set -euo pipefail
+
+    # Use INSTALL_DIR from environment if set, otherwise use invocation directory
+    install_dir="${INSTALL_DIR:-{{ cwd }}}"
+
+    gist_hash=$(jq -r --null-input '{{ replace_regex(gists, "\\s", "") }} | .{{ gist_id }}')
+    if [[ -z "$gist_hash" || "$gist_hash" == "null" ]]; then
+        echo "Error: Unknown gist '{{ gist_id }}'"
+        echo "Available gists:"
+        jq -r --null-input '{{ replace_regex(gists, "\\s", "") }} | keys | .[]' | sort
+        exit 1
     fi
 
-[group('template')]
-init target:
-    @just -f "{{ justfile() }}" "templates-{{ target }}"
+    # Check for --dry-run flag
+    recipe="install"
+    for flag in {{ FLAGS }}; do
+        if [[ "$flag" == "--dry-run" ]]; then
+            recipe="dry-run"
+        fi
+    done
 
-# Creates the dir structure and placeholder files for github
+    tmp_dir=$(mktemp -d)
+    trap "rm -rf $tmp_dir" EXIT
+
+    echo "Cloning gist {{ gist_id }}..."
+    gh gist clone "$gist_hash" "$tmp_dir" -- --quiet
+
+    # Find the justfile (could be named <gist_id>.just or justfile)
+    justfile=""
+    for f in "$tmp_dir"/*.just "$tmp_dir/justfile"; do
+        if [[ -f "$f" ]]; then
+            justfile="$f"
+            break
+        fi
+    done
+
+    if [[ -z "$justfile" ]]; then
+        echo "Error: No justfile found in gist {{ gist_id }}"
+        exit 1
+    fi
+
+    echo "Running recipe '$recipe'..."
+    INSTALL_DIR="$install_dir" just -f "$justfile" "$recipe"
+
+# Remove installed templates from a gist
+
+# Use --dry-run to preview what would be removed
+[group('template')]
+remove-gist gist_id *FLAGS:
+    #!/usr/bin/env bash
+    set -euo pipefail
+
+    # Use INSTALL_DIR from environment if set, otherwise use invocation directory
+    install_dir="${INSTALL_DIR:-{{ cwd }}}"
+
+    gist_hash=$(jq -r --null-input '{{ replace_regex(gists, "\\s", "") }} | .{{ gist_id }}')
+    if [[ -z "$gist_hash" || "$gist_hash" == "null" ]]; then
+        echo "Error: Unknown gist '{{ gist_id }}'"
+        echo "Available gists:"
+        jq -r --null-input '{{ replace_regex(gists, "\\s", "") }} | keys | .[]' | sort
+        exit 1
+    fi
+
+    # Check for --dry-run flag
+    dry_run=""
+    for flag in {{ FLAGS }}; do
+        if [[ "$flag" == "--dry-run" ]]; then
+            dry_run="true"
+        fi
+    done
+
+    tmp_dir=$(mktemp -d)
+    trap "rm -rf $tmp_dir" EXIT
+
+    echo "Cloning gist {{ gist_id }}..."
+    gh gist clone "$gist_hash" "$tmp_dir" -- --quiet
+
+    # Find the justfile (could be named <gist_id>.just or justfile)
+    justfile=""
+    for f in "$tmp_dir"/*.just "$tmp_dir/justfile"; do
+        if [[ -f "$f" ]]; then
+            justfile="$f"
+            break
+        fi
+    done
+
+    if [[ -z "$justfile" ]]; then
+        echo "Error: No justfile found in gist {{ gist_id }}"
+        exit 1
+    fi
+
+    if [[ -n "$dry_run" ]]; then
+        echo "Would run 'uninstall' recipe (dry-run)..."
+        INSTALL_DIR="$install_dir" just -f "$justfile" --dry-run uninstall
+    else
+        echo "Running recipe 'uninstall'..."
+        INSTALL_DIR="$install_dir" just -f "$justfile" uninstall
+    fi
+
+# List available template gists
+[group('template')]
+list-gists filter="":
+    #!/usr/bin/env bash
+    echo "=== Available Template Gists ==="
+    if [[ -z "{{ filter }}" ]]; then
+        jq -r --null-input '{{ replace_regex(gists, "\\s", "") }} | keys | .[]' | sort
+    else
+        jq -r --null-input '{{ replace_regex(gists, "\\s", "") }} | keys | .[]' | grep -i "{{ filter }}" | sort
+    fi
+
+# ============================================================================
+# GitHub Repository Templates
+# ============================================================================
+
+# Initialize a complete GitHub repository with all templates
+[group('github')]
+init-github: _mktree-github
+    INSTALL_DIR="{{ cwd }}" just apply-gist common
+    INSTALL_DIR="{{ cwd }}" just apply-gist github
+    INSTALL_DIR="{{ cwd }}" just apply-gist github_workflows
+    INSTALL_DIR="{{ cwd }}" just apply-gist github_rulesets
+    INSTALL_DIR="{{ cwd }}" just apply-gist issues
+    INSTALL_DIR="{{ cwd }}" just apply-gist prs
+
+# Apply only common files (CODE_OF_CONDUCT, CONTRIBUTING, etc.)
+[group('github')]
+init-github-common: _mktree-github
+    INSTALL_DIR="{{ cwd }}" just apply-gist common
+
+# Apply only GitHub config files (FUNDING, labels, release-drafter)
+[group('github')]
+init-github-config: _mktree-github
+    INSTALL_DIR="{{ cwd }}" just apply-gist github
+
+# Apply only GitHub workflows
+[group('github')]
+init-github-workflows: _mktree-github
+    INSTALL_DIR="{{ cwd }}" just apply-gist github_workflows
+
+# Apply only GitHub rulesets
+[group('github')]
+init-github-rulesets: _mktree-github
+    INSTALL_DIR="{{ cwd }}" just apply-gist github_rulesets
+
+# Apply only issue templates
+[group('github')]
+init-github-issues: _mktree-github
+    INSTALL_DIR="{{ cwd }}" just apply-gist issues
+
+# Apply only PR templates
+[group('github')]
+init-github-prs: _mktree-github
+    INSTALL_DIR="{{ cwd }}" just apply-gist prs
+
 [group('github')]
 [private]
-mktree-github:
-    mkdir -p .github/{rulesets,workflows,ISSUE_TEMPLATE,pull-requests}
-    touch .github/{rulesets,workflows,ISSUE_TEMPLATE,pull-requests}/.gitkeep
+_mktree-github:
+    mkdir -p "{{ cwd }}"/.github/{rulesets,workflows,ISSUE_TEMPLATE,pull-requests}
 
-# Creates the dir structure and placeholder files for obsidian
+# ============================================================================
+# Obsidian Vault Templates
+# ============================================================================
+
+# Initialize a complete Obsidian vault with all configs and plugins
 [group('obsidian')]
-[private]
-mktree-obsdian:
-    mkdir -p .obsidian/{fileClasses,plugins,templates}
-    touch .obsidian/{fileClasses,plugins,templates}/.gitkeep
+init-obsidian: _mktree-obsidian init-obsidian-core init-obsidian-templates init-obsidian-fileclasses init-obsidian-plugins
 
-# Initialize a github repo
-[group('github')]
-[group('template')]
-[parallel]
-[private]
-templates-github: mktree-github
-    @just -f "{{ justfile() }}" get-template "common" "CODE_OF_CONDUCT.md" > "{{ invocation_directory() }}/CODE_OF_CONDUCT.md"
-    @just -f "{{ justfile() }}" get-template "common" "CONTRIBUTING.md" > "{{ invocation_directory() }}/CONTRIBUTING.md"
-    @just -f "{{ justfile() }}" get-template "common" "gitattributes" > "{{ invocation_directory() }}/.gitattributes"
-    @just -f "{{ justfile() }}" get-template "common" "CHANGELOG.md" > "{{ invocation_directory() }}/CHANGELOG.md"
-    @just -f "{{ justfile() }}" get-template "common" "SECURITY.md" > "{{ invocation_directory() }}/SECURITY.md"
-    @just -f "{{ justfile() }}" get-template "common" "CODEOWNERS" > "{{ invocation_directory() }}/.github/CODEOWNERS"
-    @just -f "{{ justfile() }}" get-template "common" "gitignore" > "{{ invocation_directory() }}/.gitignore"
-    @just -f "{{ justfile() }}" get-template "github" "release-drafter.yml" > "{{ invocation_directory() }}/.github/release-drafter.yml"
-    @just -f "{{ justfile() }}" get-template "github" "FUNDING.yml" > "{{ invocation_directory() }}/.github/FUNDING.yml"
-    @just -f "{{ justfile() }}" get-template "github" "labels.yml" > "{{ invocation_directory() }}/.github/labels.yml"
-    @just -f "{{ justfile() }}" get-template "github_workflows" "project-automation.yml" > "{{ invocation_directory() }}/.github/workflows/project-automation.yml"
-    @just -f "{{ justfile() }}" get-template "github_workflows" "dependency-review.yml" > "{{ invocation_directory() }}/.github/workflows/dependency-review.yml"
-    @just -f "{{ justfile() }}" get-template "github_workflows" "release-drafter.yml" > "{{ invocation_directory() }}/.github/workflows/release-drafter.yml"
-    @just -f "{{ justfile() }}" get-template "github_workflows" "release-bundle.yml" > "{{ invocation_directory() }}/.github/workflows/release-bundle.yml"
-    @just -f "{{ justfile() }}" get-template "github_workflows" "secret-scanner.yml" > "{{ invocation_directory() }}/.github/workflows/secret-scanner.yml"
-    @just -f "{{ justfile() }}" get-template "github_workflows" "mdbook-build.yml" > "{{ invocation_directory() }}/.github/workflows/mdbook-build.yml"
-    @just -f "{{ justfile() }}" get-template "github_workflows" "issue-triage.yml" > "{{ invocation_directory() }}/.github/workflows/issue-triage.yml"
-    @just -f "{{ justfile() }}" get-template "github_workflows" "label-sync.yml" > "{{ invocation_directory() }}/.github/workflows/label-sync.yml"
-    @just -f "{{ justfile() }}" get-template "github_workflows" "hadolint.yml" > "{{ invocation_directory() }}/.github/workflows/hadolint.yml"
-    @just -f "{{ justfile() }}" get-template "github_workflows" "stale.yml" > "{{ invocation_directory() }}/.github/workflows/stale.yml"
-    @just -f "{{ justfile() }}" get-template "github_rulesets" "integration-branch-protection.json" > "{{ invocation_directory() }}/.github/rulesets/integration-branch-protection.json"
-    @just -f "{{ justfile() }}" get-template "github_rulesets" "integration-pr-reviews.json" > "{{ invocation_directory() }}/.github/rulesets/integration-pr-reviews.json"
-    @just -f "{{ justfile() }}" get-template "github_rulesets" "main-branch-protection.json" > "{{ invocation_directory() }}/.github/rulesets/main-branch-protection.json"
-    @just -f "{{ justfile() }}" get-template "github_rulesets" "main-pr-reviews.json" > "{{ invocation_directory() }}/.github/rulesets/main-pr-reviews.json"
-
+# Apply only core Obsidian config files
 [group('obsidian')]
-[group('template')]
-[parallel]
-[private]
-templates-obsidian: mktree-obsdian
-    @just -f "{{ justfile() }}" templates-obsidian-root
-    @just -f "{{ justfile() }}" templates-obsidian-templates
-    @just -f "{{ justfile() }}" templates-obsidian-plugins
-    @just -f "{{ justfile() }}" templates-obsidian-fileclasses
+init-obsidian-core: _mktree-obsidian
+    INSTALL_DIR="{{ cwd }}" just apply-gist obsidian
 
+# Apply only Obsidian note templates
 [group('obsidian')]
-[group('template')]
-[parallel]
-[private]
-templates-obsidian-root:
-    @just -f "{{ justfile() }}" get-template "obsidian" "daily-notes.json" > "{{ invocation_directory() }}/.obsidian/daily-notes.json"
-    @just -f "{{ justfile() }}" get-template "obsidian" "appearance.json" > "{{ invocation_directory() }}/.obsidian/appearance.json"
-    @just -f "{{ justfile() }}" get-template "obsidian" "types.json" > "{{ invocation_directory() }}/.obsidian/types.json"
-    @just -f "{{ justfile() }}" get-template "obsidian" "gitignore" > "{{ invocation_directory() }}/.obsidian/.gitignore"
-    @just -f "{{ justfile() }}" get-template "obsidian" "app.json" > "{{ invocation_directory() }}/.obsidian/app.json"
+init-obsidian-templates: _mktree-obsidian
+    INSTALL_DIR="{{ cwd }}" just apply-gist obsidian_templates
 
+# Apply only Obsidian fileclass definitions
 [group('obsidian')]
-[group('template')]
-[parallel]
-[private]
-templates-obsidian-templates:
-    @just -f "{{ justfile() }}" get-template "obsidian_templates" "adr" > "{{ invocation_directory() }}/.obsidian/templates/adr"
-    @just -f "{{ justfile() }}" get-template "obsidian_templates" "ai-rules" > "{{ invocation_directory() }}/.obsidian/templates/ai-rules"
-    @just -f "{{ justfile() }}" get-template "obsidian_templates" "BRD" > "{{ invocation_directory() }}/.obsidian/templates/BRD"
-    @just -f "{{ justfile() }}" get-template "obsidian_templates" "bug-report" > "{{ invocation_directory() }}/.obsidian/templates/bug-report"
-    @just -f "{{ justfile() }}" get-template "obsidian_templates" "changelog" > "{{ invocation_directory() }}/.obsidian/templates/changelog"
-    @just -f "{{ justfile() }}" get-template "obsidian_templates" "cheatsheet" > "{{ invocation_directory() }}/.obsidian/templates/cheatsheet"
-    @just -f "{{ justfile() }}" get-template "obsidian_templates" "cornell-note" > "{{ invocation_directory() }}/.obsidian/templates/cornell-note"
-    @just -f "{{ justfile() }}" get-template "obsidian_templates" "daily" > "{{ invocation_directory() }}/.obsidian/templates/daily"
-    @just -f "{{ justfile() }}" get-template "obsidian_templates" "dashboard" > "{{ invocation_directory() }}/.obsidian/templates/dashboard"
-    @just -f "{{ justfile() }}" get-template "obsidian_templates" "doc-note" > "{{ invocation_directory() }}/.obsidian/templates/doc-note"
-    @just -f "{{ justfile() }}" get-template "obsidian_templates" "experiment" > "{{ invocation_directory() }}/.obsidian/templates/experiment"
-    @just -f "{{ justfile() }}" get-template "obsidian_templates" "FRD" > "{{ invocation_directory() }}/.obsidian/templates/FRD"
-    @just -f "{{ justfile() }}" get-template "obsidian_templates" "guide" > "{{ invocation_directory() }}/.obsidian/templates/guide"
-    @just -f "{{ justfile() }}" get-template "obsidian_templates" "hypothesis" > "{{ invocation_directory() }}/.obsidian/templates/hypothesis"
-    @just -f "{{ justfile() }}" get-template "obsidian_templates" "issue" > "{{ invocation_directory() }}/.obsidian/templates/issue"
-    @just -f "{{ justfile() }}" get-template "obsidian_templates" "meeting-note" > "{{ invocation_directory() }}/.obsidian/templates/meeting-note"
-    @just -f "{{ justfile() }}" get-template "obsidian_templates" "note" > "{{ invocation_directory() }}/.obsidian/templates/note"
-    @just -f "{{ justfile() }}" get-template "obsidian_templates" "plan" > "{{ invocation_directory() }}/.obsidian/templates/plan"
-    @just -f "{{ justfile() }}" get-template "obsidian_templates" "PRD" > "{{ invocation_directory() }}/.obsidian/templates/PRD"
-    @just -f "{{ justfile() }}" get-template "obsidian_templates" "reference" > "{{ invocation_directory() }}/.obsidian/templates/reference"
-    @just -f "{{ justfile() }}" get-template "obsidian_templates" "research" > "{{ invocation_directory() }}/.obsidian/templates/research"
-    @just -f "{{ justfile() }}" get-template "obsidian_templates" "roadmap" > "{{ invocation_directory() }}/.obsidian/templates/roadmap"
-    @just -f "{{ justfile() }}" get-template "obsidian_templates" "runbook" > "{{ invocation_directory() }}/.obsidian/templates/runbook"
-    @just -f "{{ justfile() }}" get-template "obsidian_templates" "slide" > "{{ invocation_directory() }}/.obsidian/templates/slide"
-    @just -f "{{ justfile() }}" get-template "obsidian_templates" "todo-file" > "{{ invocation_directory() }}/.obsidian/templates/todo-file"
-    @just -f "{{ justfile() }}" get-template "obsidian_templates" "tutorial" > "{{ invocation_directory() }}/.obsidian/templates/tutorial"
+init-obsidian-fileclasses: _mktree-obsidian
+    INSTALL_DIR="{{ cwd }}" just apply-gist obsidian_fileclasses
 
+# Apply all Obsidian plugin configs
 [group('obsidian')]
 [group('plugin')]
-[group('template')]
 [parallel]
-[private]
-templates-obsidian-plugins:
-    @just -f "{{ justfile() }}" templates-obsidian-plugin-calendar
-    @just -f "{{ justfile() }}" templates-obsidian-plugin-charts
-    @just -f "{{ justfile() }}" templates-obsidian-plugin-checklists
-    @just -f "{{ justfile() }}" templates-obsidian-plugin-dataview
-    @just -f "{{ justfile() }}" templates-obsidian-plugin-excalidraw
-    @just -f "{{ justfile() }}" templates-obsidian-plugin-frontmattertitle
-    @just -f "{{ justfile() }}" templates-obsidian-plugin-git
-    @just -f "{{ justfile() }}" templates-obsidian-plugin-graphanalysis
-    @just -f "{{ justfile() }}" templates-obsidian-plugin-kanban
-    @just -f "{{ justfile() }}" templates-obsidian-plugin-linter
-    @just -f "{{ justfile() }}" templates-obsidian-plugin-mermaidtools
-    @just -f "{{ justfile() }}" templates-obsidian-plugin-metadatamenu
-    @just -f "{{ justfile() }}" templates-obsidian-plugin-reminder
-    @just -f "{{ justfile() }}" templates-obsidian-plugin-tableeditor
-    @just -f "{{ justfile() }}" templates-obsidian-plugin-tasks
-    @just -f "{{ justfile() }}" templates-obsidian-plugin-templater
-    @just -f "{{ justfile() }}" templates-obsidian-plugin-updatetimeonedit
-    @just -f "{{ justfile() }}" templates-obsidian-plugin-zettelflow
+init-obsidian-plugins: _mktree-obsidian
+    INSTALL_DIR="{{ cwd }}" just init-obsidian-plugin calendar
+    INSTALL_DIR="{{ cwd }}" just init-obsidian-plugin charts
+    INSTALL_DIR="{{ cwd }}" just init-obsidian-plugin checklists
+    INSTALL_DIR="{{ cwd }}" just init-obsidian-plugin dataview
+    INSTALL_DIR="{{ cwd }}" just init-obsidian-plugin excalidraw
+    INSTALL_DIR="{{ cwd }}" just init-obsidian-plugin frontmattertitle
+    INSTALL_DIR="{{ cwd }}" just init-obsidian-plugin git
+    INSTALL_DIR="{{ cwd }}" just init-obsidian-plugin graphanalysis
+    INSTALL_DIR="{{ cwd }}" just init-obsidian-plugin kanban
+    INSTALL_DIR="{{ cwd }}" just init-obsidian-plugin linter
+    INSTALL_DIR="{{ cwd }}" just init-obsidian-plugin mermaidtools
+    INSTALL_DIR="{{ cwd }}" just init-obsidian-plugin metadatamenu
+    INSTALL_DIR="{{ cwd }}" just init-obsidian-plugin reminder
+    INSTALL_DIR="{{ cwd }}" just init-obsidian-plugin tableeditor
+    INSTALL_DIR="{{ cwd }}" just init-obsidian-plugin tasks
+    INSTALL_DIR="{{ cwd }}" just init-obsidian-plugin templater
+    INSTALL_DIR="{{ cwd }}" just init-obsidian-plugin updatetimeonedit
+    INSTALL_DIR="{{ cwd }}" just init-obsidian-plugin zettelflow
 
+# Apply a specific Obsidian plugin config
 [group('obsidian')]
 [group('plugin')]
-[group('template')]
-[parallel]
-[private]
-templates-obsidian-plugin-calendar:
-    @just -f "{{ justfile() }}" get-template "obsidian_plugin_calendar" "calendar/data.json" > "{{ invocation_directory() }}/plugins/calendar/data.json"
-    @just -f "{{ justfile() }}" get-template "obsidian_plugin_calendar" "calendar/manifest.json" > "{{ invocation_directory() }}/plugins/calendar/manifest.json"
+init-obsidian-plugin plugin: _mktree-obsidian
+    INSTALL_DIR="${INSTALL_DIR:-{{ cwd }}}" just apply-gist "obsidian_plugin_{{ plugin }}"
 
 [group('obsidian')]
-[group('plugin')]
-[group('template')]
-[parallel]
 [private]
-templates-obsidian-plugin-dataview:
-    @just -f "{{ justfile() }}" get-template "obsidian_plugin_dataview" "dataview/data.json" > "{{ invocation_directory() }}/plugins/dataview/data.json"
-    @just -f "{{ justfile() }}" get-template "obsidian_plugin_dataview" "dataview/manifest.json" > "{{ invocation_directory() }}/plugins/dataview/manifest.json"
-
-[group('obsidian')]
-[group('plugin')]
-[group('template')]
-[parallel]
-[private]
-templates-obsidian-plugin-graphanalysis:
-    @just -f "{{ justfile() }}" get-template "obsidian_plugin_graphanalysis" "graph-analysis/manifest.json" > "{{ invocation_directory() }}/plugins/graph-analysis/manifest.json"
-
-[group('obsidian')]
-[group('plugin')]
-[group('template')]
-[parallel]
-[private]
-templates-obsidian-plugin-mermaidtools:
-    @just -f "{{ justfile() }}" get-template "obsidian_plugin_mermaidtools" "mermaid-tools/manifest.json" > "{{ invocation_directory() }}/plugins/mermaid-tools/manifest.json"
-
-[group('obsidian')]
-[group('plugin')]
-[group('template')]
-[parallel]
-[private]
-templates-obsidian-plugin-metadatamenu:
-    @just -f "{{ justfile() }}" get-template "obsidian_plugin_metadatamenu" "metadata-menu/data.json" > "{{ invocation_directory() }}/plugins/metadata-menu/data.json"
-    @just -f "{{ justfile() }}" get-template "obsidian_plugin_metadatamenu" "metadata-menu/manifest.json" > "{{ invocation_directory() }}/plugins/metadata-menu/manifest.json"
-
-[group('obsidian')]
-[group('plugin')]
-[group('template')]
-[parallel]
-[private]
-templates-obsidian-plugin-charts:
-    @just -f "{{ justfile() }}" get-template "obsidian_plugin_charts" "obsidian-charts/manifest.json" > "{{ invocation_directory() }}/plugins/obsidian-charts/manifest.json"
-
-[group('obsidian')]
-[group('plugin')]
-[group('template')]
-[parallel]
-[private]
-templates-obsidian-plugin-checklists:
-    @just -f "{{ justfile() }}" get-template "obsidian_plugin_checklists" "obsidian-checklist-plugin/manifest.json" > "{{ invocation_directory() }}/plugins/obsidian-checklist-plugin/manifest.json"
-
-[group('obsidian')]
-[group('plugin')]
-[group('template')]
-[parallel]
-[private]
-templates-obsidian-plugin-excalidraw:
-    @just -f "{{ justfile() }}" get-template "obsidian_plugin_excalidraw" "obsidian-excalidraw-plugin/manifest.json" > "{{ invocation_directory() }}/plugins/obsidian-excalidraw-plugin/manifest.json"
-
-[group('obsidian')]
-[group('plugin')]
-[group('template')]
-[parallel]
-[private]
-templates-obsidian-plugin-frontmattertitle:
-    @just -f "{{ justfile() }}" get-template "obsidian_plugin_frontmattertitle" "obsidian-front-matter-title-plugin/manifest.json" > "{{ invocation_directory() }}/plugins/obsidian-front-matter-title-plugin/manifest.json"
-
-[group('obsidian')]
-[group('plugin')]
-[group('template')]
-[parallel]
-[private]
-templates-obsidian-plugin-git:
-    @just -f "{{ justfile() }}" get-template "obsidian_plugin_git" "obsidian-git/data.json" > "{{ invocation_directory() }}/plugins/obsidian-git/data.json"
-    @just -f "{{ justfile() }}" get-template "obsidian_plugin_git" "obsidian-git/manifest.json" > "{{ invocation_directory() }}/plugins/obsidian-git/manifest.json"
-    @just -f "{{ justfile() }}" get-template "obsidian_plugin_git" "obsidian-git/obsidian_askpass.sh" > "{{ invocation_directory() }}/plugins/obsidian-git/obsidian_askpass.sh"
-
-[group('obsidian')]
-[group('plugin')]
-[group('template')]
-[parallel]
-[private]
-templates-obsidian-plugin-kanban:
-    @just -f "{{ justfile() }}" get-template "obsidian_plugin_kanban" "obsidian-kanban/manifest.json" > "{{ invocation_directory() }}/plugins/obsidian-kanban/manifest.json"
-
-[group('obsidian')]
-[group('plugin')]
-[group('template')]
-[parallel]
-[private]
-templates-obsidian-plugin-linter:
-    @just -f "{{ justfile() }}" get-template "obsidian_plugin_linter" "obsidian-linter/data.json" > "{{ invocation_directory() }}/plugins/obsidian-linter/data.json"
-    @just -f "{{ justfile() }}" get-template "obsidian_plugin_linter" "obsidian-linter/manifest.json" > "{{ invocation_directory() }}/plugins/obsidian-linter/manifest.json"
-
-[group('obsidian')]
-[group('plugin')]
-[group('template')]
-[parallel]
-[private]
-templates-obsidian-plugin-reminder:
-    @just -f "{{ justfile() }}" get-template "obsidian_plugin_reminder" "obsidian-reminder-plugin/data.json" > "{{ invocation_directory() }}/plugins/obsidian-reminder-plugin/data.json"
-    @just -f "{{ justfile() }}" get-template "obsidian_plugin_reminder" "obsidian-reminder-plugin/manifest.json" > "{{ invocation_directory() }}/plugins/obsidian-reminder-plugin/manifest.json"
-
-[group('obsidian')]
-[group('plugin')]
-[group('template')]
-[parallel]
-[private]
-templates-obsidian-plugin-tasks:
-    @just -f "{{ justfile() }}" get-template "obsidian_plugin_tasks" "obsidian-tasks-plugin/data.json" > "{{ invocation_directory() }}/plugins/obsidian-tasks-plugin/data.json"
-    @just -f "{{ justfile() }}" get-template "obsidian_plugin_tasks" "obsidian-tasks-plugin/manifest.json" > "{{ invocation_directory() }}/plugins/obsidian-tasks-plugin/manifest.json"
-
-[group('obsidian')]
-[group('plugin')]
-[group('template')]
-[parallel]
-[private]
-templates-obsidian-plugin-tableeditor:
-    @just -f "{{ justfile() }}" get-template "obsidian_plugin_tableeditor" "table-editor-obsidian/data.json" > "{{ invocation_directory() }}/plugins/table-editor-obsidian/data.json"
-    @just -f "{{ justfile() }}" get-template "obsidian_plugin_tableeditor" "table-editor-obsidian/manifest.json" > "{{ invocation_directory() }}/plugins/table-editor-obsidian/manifest.json"
-
-[group('obsidian')]
-[group('plugin')]
-[group('template')]
-[parallel]
-[private]
-templates-obsidian-plugin-templater:
-    @just -f "{{ justfile() }}" get-template "obsidian_plugin_templater" "templater-obsidian/data.json" > "{{ invocation_directory() }}/plugins/templater-obsidian/data.json"
-    @just -f "{{ justfile() }}" get-template "obsidian_plugin_templater" "templater-obsidian/manifest.json" > "{{ invocation_directory() }}/plugins/templater-obsidian/manifest.json"
-
-[group('obsidian')]
-[group('plugin')]
-[group('template')]
-[parallel]
-[private]
-templates-obsidian-plugin-updatetimeonedit:
-    @just -f "{{ justfile() }}" get-template "obsidian_plugin_updatetimeonedit" "update-time-on-edit/data.json" > "{{ invocation_directory() }}/plugins/update-time-on-edit/data.json"
-    @just -f "{{ justfile() }}" get-template "obsidian_plugin_updatetimeonedit" "update-time-on-edit/manifest.json" > "{{ invocation_directory() }}/plugins/update-time-on-edit/manifest.json"
-
-[group('obsidian')]
-[group('plugin')]
-[group('template')]
-[parallel]
-[private]
-templates-obsidian-plugin-zettelflow:
-    @just -f "{{ justfile() }}" get-template "obsidian_plugin_zettelflow" "zettelflow/data.json" > "{{ invocation_directory() }}/plugins/zettelflow/data.json"
-    @just -f "{{ justfile() }}" get-template "obsidian_plugin_zettelflow" "zettelflow/manifest.json" > "{{ invocation_directory() }}/plugins/zettelflow/manifest.json"
-
-[group('obsidian')]
-[group('plugin')]
-[group('template')]
-[parallel]
-[private]
-templates-obsidian-fileclasses:
-    @just -f "{{ justfile() }}" get-template "obsidian_fileclasses" "adr.md" > "{{ invocation_directory() }}/.obsidian/fileClasses/adr.md"
-    @just -f "{{ justfile() }}" get-template "obsidian_fileclasses" "ai-rules.md" > "{{ invocation_directory() }}/.obsidian/fileClasses/ai-rules.md"
-    @just -f "{{ justfile() }}" get-template "obsidian_fileclasses" "doc-note.md" > "{{ invocation_directory() }}/.obsidian/fileClasses/doc-note.md"
-    @just -f "{{ justfile() }}" get-template "obsidian_fileclasses" "journal.md" > "{{ invocation_directory() }}/.obsidian/fileClasses/journal.md"
-    @just -f "{{ justfile() }}" get-template "obsidian_fileclasses" "plan.md" > "{{ invocation_directory() }}/.obsidian/fileClasses/plan.md"
-    @just -f "{{ justfile() }}" get-template "obsidian_fileclasses" "prd.md" > "{{ invocation_directory() }}/.obsidian/fileClasses/prd.md"
-    @just -f "{{ justfile() }}" get-template "obsidian_fileclasses" "research.md" > "{{ invocation_directory() }}/.obsidian/fileClasses/research.md"
-    @just -f "{{ justfile() }}" get-template "obsidian_fileclasses" "runbook.md" > "{{ invocation_directory() }}/.obsidian/fileClasses/runbook.md"
-    @just -f "{{ justfile() }}" get-template "obsidian_fileclasses" "todo-file.md" > "{{ invocation_directory() }}/.obsidian/fileClasses/todo-file.md"
+_mktree-obsidian:
+    mkdir -p "{{ cwd }}"/.obsidian/{fileClasses,plugins,templates}
