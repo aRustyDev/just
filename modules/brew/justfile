@@ -1,0 +1,5 @@
+ls-formulas tap:
+    brew tap-info "{{ if tap =~ "/" { tap } else { tap / "tap" } }}" --json | jq -r '.[]|(.formula_names[],.cask_tokens[])'
+
+ls-taps:
+    brew tap
